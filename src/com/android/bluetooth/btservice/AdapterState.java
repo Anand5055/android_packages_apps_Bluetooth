@@ -56,8 +56,6 @@ final class AdapterState extends StateMachine {
     static final int BLE_STOPPED=25;
     static final int BREDR_STOPPED = 26;
 
-    static final int BEGIN_BREDR_CLEANUP = 27;
-
     static final int BREDR_START_TIMEOUT = 100;
     static final int ENABLE_TIMEOUT = 101;
     static final int DISABLE_TIMEOUT = 103;
@@ -65,8 +63,6 @@ final class AdapterState extends StateMachine {
     static final int SET_SCAN_MODE_TIMEOUT = 105;
     static final int BLE_START_TIMEOUT = 106;
     static final int BREDR_STOP_TIMEOUT = 107;
-
-    static final int BREDR_CLEANUP_TIMEOUT = 108;
 
     static final int USER_TURN_OFF_DELAY_MS=500;
 
@@ -82,7 +78,6 @@ final class AdapterState extends StateMachine {
     private static final int PROPERTY_OP_DELAY =2000;
     private AdapterService mAdapterService;
     private AdapterProperties mAdapterProperties;
-    private Vendor mVendor;
     private PendingCommandState mPendingCommandState = new PendingCommandState();
     private OnState mOnState = new OnState();
     private OffState mOffState = new OffState();
@@ -112,7 +107,7 @@ final class AdapterState extends StateMachine {
         return isTurningOff;
     }
 
-    private AdapterState(AdapterService service, AdapterProperties adapterProperties, Vendor vendor) {
+    private AdapterState(AdapterService service, AdapterProperties adapterProperties) {
         super("BluetoothAdapterState:");
         addState(mOnState);
         addState(mBleOnState);
@@ -120,13 +115,12 @@ final class AdapterState extends StateMachine {
         addState(mPendingCommandState);
         mAdapterService = service;
         mAdapterProperties = adapterProperties;
-        mVendor = vendor;
         setInitialState(mOffState);
     }
 
-    public static AdapterState make(AdapterService service, AdapterProperties adapterProperties, Vendor vendor) {
+    public static AdapterState make(AdapterService service, AdapterProperties adapterProperties) {
         Log.d(TAG, "make() - Creating AdapterState");
-        AdapterState as = new AdapterState(service, adapterProperties, vendor);
+        AdapterState as = new AdapterState(service, adapterProperties);
         as.start();
         return as;
     }
@@ -401,15 +395,8 @@ final class AdapterState extends StateMachine {
                      warningLog("Timeout while setting scan mode. Continuing with disable...");
                      //Fall through
 
-                case BEGIN_BREDR_CLEANUP:
-                     removeMessages(SET_SCAN_MODE_TIMEOUT);
-                     sendMessageDelayed(BREDR_CLEANUP_TIMEOUT, PROPERTY_OP_DELAY);
-                     Log.w(TAG,"Calling BREDR cleanup");
-                     mVendor.bredrCleanup();
-                     break;
-
                 case BEGIN_DISABLE:
-                    removeMessages(BREDR_CLEANUP_TIMEOUT);
+                    removeMessages(SET_SCAN_MODE_TIMEOUT);
                     sendMessageDelayed(BREDR_STOP_TIMEOUT, BREDR_STOP_TIMEOUT_DELAY);
                     adapterService.stopProfileServices();
                     break;
@@ -454,7 +441,6 @@ final class AdapterState extends StateMachine {
 
                 case BREDR_START_TIMEOUT:
                     errorLog("Error enabling Bluetooth (start timeout)");
-                    mVendor.ssrCleanup(false);
                     mPendingCommandState.setTurningOn(false);
                     notifyAdapterStateChange(BluetoothAdapter.STATE_OFF);
                     adapterService.disableProfileServices();
@@ -465,7 +451,6 @@ final class AdapterState extends StateMachine {
 
                 case ENABLE_TIMEOUT:
                     errorLog("Error enabling Bluetooth (enable timeout)");
-                    mVendor.ssrCleanup(false);
                     mPendingCommandState.setBleTurningOn(false);
                     adapterService.stopGattProfileService();
                     notifyAdapterStateChange(BluetoothAdapter.STATE_OFF);
@@ -474,19 +459,8 @@ final class AdapterState extends StateMachine {
                     android.os.Process.killProcess(android.os.Process.myPid());
                     break;
 
-                case BREDR_CLEANUP_TIMEOUT:
-                    errorLog("Error cleaningup Bluetooth profiles (cleanup timeout)");
-                    mVendor.ssrCleanup(false);
-                    mPendingCommandState.setTurningOff(false);
-                    transitionTo(mBleOnState);
-                    notifyAdapterStateChange(BluetoothAdapter.STATE_BLE_ON);
-                    errorLog("BREDR_CLEANUP_TIMEOUT:Killing the process to force a restart as part cleanup");
-                    android.os.Process.killProcess(android.os.Process.myPid());
-                    break;
-
                 case BREDR_STOP_TIMEOUT:
                     errorLog("Error stopping Bluetooth profiles (stop timeout)");
-                    mVendor.ssrCleanup(false);
                     mPendingCommandState.setTurningOff(false);
                     notifyAdapterStateChange(BluetoothAdapter.STATE_BLE_ON);
                     adapterService.disableProfileServices();
@@ -510,7 +484,6 @@ final class AdapterState extends StateMachine {
                     }
                     adapterService.stopGattProfileService();
                     mPendingCommandState.setTurningOff(false);
-                    mVendor.ssrCleanup(true);
                     setBleTurningOff(false);
                     transitionTo(mOffState);
                     notifyAdapterStateChange(BluetoothAdapter.STATE_OFF);
